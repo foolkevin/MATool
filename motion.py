@@ -99,6 +99,7 @@ class MotionAnalysis:
         seqinfo = self.pathDict[sequence]
         gt_bboxes = self.loadtxt(seqinfo['gt'])
         gt_bboxes[:, :2] = gt_bboxes[:, :2] + gt_bboxes[:, 2:] / 2
+        gt_bboxes[:, 2] = gt_bboxes[:, 2] / (gt_bboxes[:, 3] + 1)
         if self.occ:
             occ_index = self.loadtxt(seqinfo['occ'])
             is_occ = self.is_occ(occ_index)
@@ -121,6 +122,7 @@ class MotionAnalysis:
                 pos = np.dot(self.kf._update_mat, self.state)
                 prediction.append(pos[np.newaxis, :])
         prediction = np.concatenate(prediction, axis=0)
+        prediction[:, 2] = prediction[:, 2] * prediction[:, 3]
         prediction[:, :2] = prediction[:, :2] - prediction[:, 2:] / 2
         save_path = self.save_pred(sequence)
         if not os.path.exists(save_path):
@@ -219,4 +221,5 @@ if __name__ == "__main__":
     if args.video:
         analyzer.analyze_sequence(args.video)
     else:
-        analyzer.analyze()
+        analyzer.predict()
+        # analyzer.analyze()
