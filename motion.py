@@ -116,7 +116,15 @@ class MotionAnalysis:
                 pos = np.dot(self.kf._update_mat, self.state)
                 prediction.append(pos[np.newaxis, :])
             else:
+<<<<<<< HEAD
                 self.state, self.state_covariance = self.kf.update(self.next_state, self.next_covariance, gt_bbox)                
+=======
+                try:
+                    self.state, self.state_covariance = self.kf.update(self.next_state, self.next_covariance, gt_bbox)                
+                except:
+                    print(sequence)
+                    return
+>>>>>>> origin/main
                 self.next_state, self.next_covariance = self.kf.predict(self.state, self.state_covariance)
                 pos = np.dot(self.kf._update_mat, self.state)
                 prediction.append(pos[np.newaxis, :])
