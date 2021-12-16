@@ -121,6 +121,7 @@ class MotionAnalysis:
                 pos = np.dot(self.kf._update_mat, self.state)
                 prediction.append(pos[np.newaxis, :])
         prediction = np.concatenate(prediction, axis=0)
+        prediction[:, :2] = prediction[:, :2] - prediction[:, 2:] / 2
         save_path = self.save_pred(sequence)
         if not os.path.exists(save_path):
             os.makedirs(save_path)
