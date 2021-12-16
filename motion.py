@@ -15,8 +15,8 @@ class MotionAnalysis:
         self.predict_path = predict_path
         self.predicted = predicted
         self.pathDict = self.get_files_path()
-        self.occ = occ # Need to show occlusion case
-        self.ov = ov # Nedd to show the case, out of view.
+        self.occ = occ # Whether to show occlusion case
+        self.ov = ov # Whether to show the case, out of view.
         self.kf = KalmanFilter()
     
     def get_files_path(self):
