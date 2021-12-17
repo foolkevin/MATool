@@ -221,5 +221,4 @@ if __name__ == "__main__":
     if args.video:
         analyzer.analyze_sequence(args.video)
     else:
-        analyzer.predict()
-        # analyzer.analyze()
+        analyzer.analyze()
