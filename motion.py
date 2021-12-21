@@ -45,8 +45,13 @@ class MotionAnalysis:
         def set_axes(ax, title, index):
             ax.set_title(title, fontsize='xx-large', fontweight='bold')
             ax.plot(time_stamp, gt_bboxes[:, index], 'k.-', markersize=0.1)
+            color_list = ['r', 'c', 'm', 'y']
+            line_list = ['-', '--', '-.', ':']
+            marker_list = ['v', '^', '<', '>']
             if self.predicted:
-                ax.plot(time_stamp, pred_bboxes[:, index], 'c*--', markersize=0.1)
+                for i in range(len(self.predict_path)):
+                    ax.plot(all_preds[i, :, index], color_list[i] + marker_list[i] + line_list[i],
+                            markersize=0.1)
             if self.occ:
                 ax.fill_between(time_stamp, lowerborder[index], upborder[index], where=self.is_occ(occ_index), 
                                 color='green', alpha=0.5)
@@ -62,13 +67,18 @@ class MotionAnalysis:
             elif self.ov:
                 ax.text(0.95, 0.95, 'blue: out of view', horizontalalignment='center', 
                         verticalalignment='center', transform=ax.transAxes, fontweight='bold')
+            ax.legend(['gt'] + [path.split('/')[-2] for path in self.predict_path])
             
         seqinfo = self.pathDict[sequence]
         gt_bboxes = self.loadtxt(seqinfo['gt'])
         gt_bboxes[:, :2] = gt_bboxes[:, :2] + gt_bboxes[:, 2:] / 2
         if self.predicted:
-            pred_bboxes = self.loadtxt(seqinfo['pred'])
-            pred_bboxes[:, :2] = pred_bboxes[:, :2] + pred_bboxes[:, 2:] / 2
+            all_preds = []
+            for i in range(len(self.predict_path)):
+                pred_bboxes = self.loadtxt(seqinfo['pred' + str(i)])
+                pred_bboxes[:, :2] = pred_bboxes[:, :2] + pred_bboxes[:, 2:] / 2
+                all_preds.append(pred_bboxes[np.newaxis, ...])
+            all_preds = np.concatenate(all_preds)
         if self.occ:
             occ_index = self.loadtxt(seqinfo['occ'])
         if self.ov:
@@ -76,7 +86,7 @@ class MotionAnalysis:
         time_stamp = np.arange(0, gt_bboxes.shape[0])
         upborder1, lowerborder1 = gt_bboxes.max(axis=0), gt_bboxes.min(axis=0)
         if self.predicted:
-            upborder2, lowerborder2 = pred_bboxes.max(axis=0), pred_bboxes.min(axis=0)
+            upborder2, lowerborder2 = all_preds.max(axis=0).max(axis=0), all_preds.min(axis=0).min(axis=0)
             upborder, lowerborder = np.maximum(upborder1, upborder2), np.minimum(lowerborder1, lowerborder2)
         else:
             upborder, lowerborder = upborder1, lowerborder1
@@ -124,10 +134,11 @@ class MotionAnalysis:
         prediction = np.concatenate(prediction, axis=0)
         prediction[:, 2] = prediction[:, 2] * prediction[:, 3]
         prediction[:, :2] = prediction[:, :2] - prediction[:, 2:] / 2
-        save_path = self.save_pred(sequence)
-        if not os.path.exists(save_path):
-            os.makedirs(save_path)
-        np.savetxt(os.path.join(save_path, sequence + '.txt'), prediction, fmt='%d')
+        save_paths = self.save_pred(sequence)
+        for save_path in save_paths:
+            if not os.path.exists(save_path):
+                os.makedirs(save_path)
+            np.savetxt(os.path.join(save_path, sequence + '.txt'), prediction, fmt='%d')
 
     def predict(self):
         for sequence in tqdm(self.pathDict.keys(), '[Predicting]', ncols=100):
@@ -180,6 +191,9 @@ class GOT10kAnalysis(MotionAnalysis):
 
 
 class OTBAnalysis(MotionAnalysis):
+    special_case = {'Human4': [('Human4', 'groundtruth_rect.2.txt')], 
+                    'Skating2': [('Skating2', 'groundtruth_rect.1.txt'), ('Skating2.2', 'groundtruth_rect.2.txt')], 
+                    'Jogging': [('Jogging1', 'groundtruth_rect.1.txt'), ('Jogging2', 'groundtruth_rect.2.txt')]}
     def __init__(self, data_path, result_path, predicted=False, predict_path=None):
         super().__init__(data_path, result_path, predicted, predict_path, occ=False, ov=False)
     
@@ -187,18 +201,21 @@ class OTBAnalysis(MotionAnalysis):
         pathDict = dict()
         sequences = os.listdir(self.data_path)
         for sequence in sequences:
-            if sequence in ['Human4', 'Skating2', 'Jogging']:
-                if sequence != 'Human4':
-                    pathDict[sequence + '.1'] = {'gt': os.path.join(self.data_path, sequence, 'groundtruth_rect.1.txt')}
-                pathDict[sequence + '.2'] = {'gt': os.path.join(self.data_path, sequence, 'groundtruth_rect.2.txt')}
-                if self.predicted:
-                    if sequence != 'Human4':
-                        pathDict[sequence + '.1']['pred'] = os.path.join(self.predict_path, sequence + '.1.txt')
-                    pathDict[sequence + '.2']['pred'] = os.path.join(self.predict_path, sequence + '.2.txt')
+            if sequence in self.special_case:
+                for key_name, gt_name in self.special_case[sequence]:
+                    pathDict[key_name] = {'gt': os.path.join(self.data_path, sequence, gt_name)} 
+                    if self.predicted:
+                        if len(self.predict_path) > 4:
+                            raise ValueError("The number of predicted models is larger than the maximum limit.")
+                        pathDict[key_name].update({'pred' + str(i): os.path.join(path, key_name + '.txt') 
+                                                for i, path in enumerate(self.predict_path)})
             else:
                 pathDict[sequence] = {'gt': os.path.join(self.data_path, sequence, 'groundtruth_rect.txt')}
                 if self.predicted:
-                    pathDict[sequence]['pred'] = os.path.join(self.predict_path, sequence + '.txt')
+                    if len(self.predict_path) > 4:
+                        raise ValueError("The number of predicted models is larger than the maximum limit.")
+                    for i, path in enumerate(self.predict_path):
+                        pathDict[sequence]['pred' + str(i)] = os.path.join(path, sequence + '.txt')
         return pathDict
 
 
@@ -208,7 +225,7 @@ def parse():
     parser.add_argument('--data_path', type=str, help='The root path of the selected dataset.')
     parser.add_argument('--result_path', type=str, help='Where do you want to restore the analysis result.')
     parser.add_argument('--compared', action='store_true', help='Whether to compare gt with the prediction.')
-    parser.add_argument('--predict_path', default=None, help='The root path where you fetch the prediction.')
+    parser.add_argument('--predict_path', action='append', default=[], help='The root path where you fetch the prediction.')
     parser.add_argument('--video', type=str, default=None, help='Select a sequence to analyze.')
     args = parser.parse_args()
     return args
