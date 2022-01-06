@@ -6,7 +6,7 @@ from tqdm import tqdm
 from kalman_filter import KalmanFilter
 
 
-datasets = ['LaSOT', 'OTB2015', 'GOT-10k']
+datasets = ['LaSOT', 'LaSOTTest', 'OTB2015', 'GOT-10k']
 
 class MotionAnalysis:
     def __init__(self, data_path, result_path, predicted=False, predict_path=None, occ=False, ov=False):
@@ -109,7 +109,7 @@ class MotionAnalysis:
         seqinfo = self.pathDict[sequence]
         gt_bboxes = self.loadtxt(seqinfo['gt'])
         gt_bboxes[:, :2] = gt_bboxes[:, :2] + gt_bboxes[:, 2:] / 2
-        gt_bboxes[:, 2] = gt_bboxes[:, 2] / (gt_bboxes[:, 3] + 1)
+        gt_bboxes[:, 2] = gt_bboxes[:, 2] / (gt_bboxes[:, 3] + 2)
         if self.occ:
             occ_index = self.loadtxt(seqinfo['occ'])
             is_occ = self.is_occ(occ_index)
@@ -119,18 +119,19 @@ class MotionAnalysis:
         prediction = []
         for i in range(gt_bboxes.shape[0]):
             gt_bbox = gt_bboxes[i, :]
-            if i == 0:
+            if gt_bbox[2] <= 0 or gt_bbox[3] <= 0:
+                prediction.append(gt_bbox[np.newaxis, :])
+                continue
+            if i == 0 or self.occ and is_occ[i - 1] or self.ov and is_ov[i - 1]:
                 self.state, self.state_covariance = self.kf.initiate(gt_bbox)
                 self.next_state, self.next_covariance = self.kf.predict(self.state, self.state_covariance)
                 prediction.append(gt_bbox[np.newaxis, :])
-            elif self.occ and is_occ[i] or self.ov and is_ov[i]:
-                pos = np.dot(self.kf._update_mat, self.state)
-                prediction.append(pos[np.newaxis, :])
             else:
+                # Quantitative analysis of the prediction accuracy of the Kalman filter without errors
+                pos = np.dot(self.kf._update_mat, self.next_state)
+                prediction.append(pos[np.newaxis, :])
                 self.state, self.state_covariance = self.kf.update(self.next_state, self.next_covariance, gt_bbox)                
                 self.next_state, self.next_covariance = self.kf.predict(self.state, self.state_covariance)
-                pos = np.dot(self.kf._update_mat, self.state)
-                prediction.append(pos[np.newaxis, :])
         prediction = np.concatenate(prediction, axis=0)
         prediction[:, 2] = prediction[:, 2] * prediction[:, 3]
         prediction[:, :2] = prediction[:, :2] - prediction[:, 2:] / 2
@@ -138,7 +139,7 @@ class MotionAnalysis:
         for save_path in save_paths:
             if not os.path.exists(save_path):
                 os.makedirs(save_path)
-            np.savetxt(os.path.join(save_path, sequence + '.txt'), prediction, fmt='%d')
+            np.savetxt(os.path.join(save_path, sequence + '.txt'), prediction, fmt='%d', delimiter=',')
 
     def predict(self):
         for sequence in tqdm(self.pathDict.keys(), '[Predicting]', ncols=100):
@@ -153,6 +154,8 @@ class LaSOTAnalysis(MotionAnalysis):
         pathDict = dict()
         sequences = os.listdir(self.data_path) 
         for sequence in sequences:
+            if not os.path.isdir(os.path.join(self.data_path, sequence)):
+                continue
             splits = os.listdir(os.path.join(self.data_path, sequence))
             for split in splits:
                 pathDict[split] = {'gt': os.path.join(self.data_path, sequence, split, 'groundtruth.txt'),
@@ -167,6 +170,27 @@ class LaSOTAnalysis(MotionAnalysis):
 
     def save_pred(self, sequence):
         return os.path.join(self.predict_path, sequence.split('-')[0])
+
+
+class LaSOTTestAnalysis(MotionAnalysis):
+    def __init__(self, data_path, result_path, predicted=False, predict_path=None):
+        super().__init__(data_path, result_path, predicted, predict_path, occ=True, ov=True)
+    
+    def get_files_path(self):
+        pathDict = dict()
+        sequences = os.listdir(self.data_path) 
+        for sequence in sequences:
+            if not os.path.isdir(os.path.join(self.data_path, sequence)):
+                continue
+            pathDict[sequence] = {'gt': os.path.join(self.data_path, sequence, 'groundtruth.txt'),
+                                'occ': os.path.join(self.data_path, sequence, 'full_occlusion.txt'),
+                                'ov': os.path.join(self.data_path, sequence, 'out_of_view.txt')} 
+            if self.predicted:
+                pathDict[sequence]['pred'] = os.path.join(self.predict_path, sequence + '.txt')
+        return pathDict
+    
+    def save_fig(self, sequence):
+        return os.path.join(self.result_path, sequence.split('-')[0])
 
 
 class GOT10kAnalysis(MotionAnalysis):
@@ -221,7 +245,8 @@ class OTBAnalysis(MotionAnalysis):
 
 def parse():
     parser = argparse.ArgumentParser(description='A motion analysis tool for Object Tracking.')
-    parser.add_argument('--dataset', type=str, choices=['LaSOT', 'OTB2015', 'GOT-10k'], help='The dataset which you want to analyze.')
+    parser.add_argument('--dataset', type=str, choices=['LaSOT', 'OTB2015', 'GOT-10k', 'LaSOTTest'], 
+        help='The dataset which you want to analyze.')
     parser.add_argument('--data_path', type=str, help='The root path of the selected dataset.')
     parser.add_argument('--result_path', type=str, help='Where do you want to restore the analysis result.')
     parser.add_argument('--compared', action='store_true', help='Whether to compare gt with the prediction.')
@@ -233,7 +258,8 @@ def parse():
 
 if __name__ == "__main__":
     args = parse()
-    analysisDict = {'LaSOT': LaSOTAnalysis, 'GOT-10k': GOT10kAnalysis, 'OTB2015': OTBAnalysis}
+    analysisDict = {'LaSOT': LaSOTAnalysis, 'LaSOTTest': LaSOTTestAnalysis, 'GOT-10k': GOT10kAnalysis, 
+                    'OTB2015': OTBAnalysis}
     analyzer = analysisDict[args.dataset](args.data_path, args.result_path, args.compared, args.predict_path)
     if args.video:
         analyzer.analyze_sequence(args.video)
